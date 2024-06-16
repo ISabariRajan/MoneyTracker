@@ -1,0 +1,14 @@
+#turn on url rewriting 
+Options -Multiviews
+RewriteEngine on
+
+
+
+#remove the need for .php extention 
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_FILENAME}\.php -f
+RewriteRule ^(.*)$ $1.php
+
+# For HTML
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ index.html [QSA,L]

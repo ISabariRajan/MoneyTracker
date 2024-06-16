@@ -1,110 +1,108 @@
 <?php
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
-// echo "FIRST";
-// Check if the request method is not POST
-if ($_SERVER['REQUEST_METHOD'] != 'POST') {
-  // Send a 403 Forbidden response and exit
-  header('HTTP/1.1 403 Forbidden');
-  exit;
-}
-// echo "POST";
-// echo $_SERVER['DOCUMENT_ROOT']."/MoneyTracker/utils.php";
+header('Content-Type: application/json');
+
+$request_method = $_SERVER['REQUEST_METHOD'];
 # Load DB, using RedBeanPHP
-require $_SERVER['DOCUMENT_ROOT']."/MoneyTracker/utils.php";
-require $_SERVER['DOCUMENT_ROOT']."/MoneyTracker/CustomBean.php";
-// require $_SERVER['DOCUMENT_ROOT']."/MoneyTracker/models/device.php";
-// require $_SERVER['DOCUMENT_ROOT']."/MoneyTracker/repository/device_repository.php";
-// require $_SERVER['DOCUMENT_ROOT']."/MoneyTracker/service/device_service.php";
+require_once $_SERVER['DOCUMENT_ROOT']."/MoneyTracker/utils.php";
+require_once $_SERVER['DOCUMENT_ROOT']."/MoneyTracker/CustomBean.php";
 
-function get_all_devices(){
-  // echo "HI";
-  // $device_repository = new DeviceRepository("device");
-  // $devices = $device_repository->get_all();
+class MeetingsController{
 
-  $service = new DeviceService();
-  $devices = $service->get_all();
-  // echo "BYE";
-  return $devices;
-}
+  private $repository;
 
-// function get_all_devices(){return R::findAll("device");}
-function get_missing_device_names($devices){
-  $existing_device = get_all_devices();
-  $device_names = array();
-  // foreach($existing_device as $device){
-  //   echo $device->name;
-  //   array_push($device_names, $device->name);
-  // }
-  return $device_names;
-}
-function save_devices($devices){
-  echo $orm;
-  // try{
-  //   // echo "SAVE";
-  //   $device = new DeviceModel();
-  //   // echo "III";
-  //   foreach(get_missing_device_names($devices) as $device){
-  //     // $device_object = R::dispense("device");
-  //     // $device_object->name = $device;
-  //     // R::store($device_object);
-  //   }
-  //   return get_all_devices();
-  // } catch(Exception $e){
-  //   return $e;
-  // }
-}
-
-function save_meetings($device_map){
-  try{
-    $devices = array_keys($device_map);
-    // Initialize RedBeanPHP
-    // $bean = R::fetchModel('test_table'); // Replace 'test_table' with your actual table name
-    // foreach($bean as $key => $value){
-    //   echo $key;
-    // }
-
-    // Get metadata about the table
-    // $metadata = R::dbMeta($bean);
-    $devices = save_devices($devices);
-    // $meetings = R::findAll("meetings");
-    // foreach($meetings as $meeting){
-    // }
-
-
-
-    // foreach($devices as $device){
-    //   foreach($device_map[$device] as $meeting){
-    //     $meeting_object = R::dispense("meetings");
-    //     $meeting_object->join_datetime = $meeting->join_datetime;
-    //     $meeting_object->leave_datetime = $meeting->leave_datetime;
-    //     $meeting_object->duration_in_minutes = $meeting->duration_in_minutes;
-    //     // $meeting_object->device_name = $device;
-    //     $meeting_object->type = $meeting->type;
-    //     R::store($meeting_object);
-    //   }
-    // }
-  } catch(Exception $e){
-    return $e;
+  public function __construct(){
+    $repository = new stdClass();
+    $repository->devices = CustomORM::repository("devices");
+    $repository->meetings = CustomORM::repository("meetings");
+    $this->repository = $repository;
   }
-  // foreach($device_map as $key => $value){
 
-  // }
+  private function get_all_devices(){
+    return $this->repository->devices->fetch_all();
+  }
+  
+  public function get_all_meetings($conditions=[]){
+    return $this->repository->meetings->fetch_all("*", $conditions);
+  }
+  private function get_missing_device_names($devices){
+  
+    $existing_device = $this->get_all_devices();
+    $device_names = array();
+    foreach($existing_device as $device){
+      array_push($device_names, $device->name);
+    }
+    $missing_devices = array();
+    foreach($devices as $device){
+      if(!in_array($device, $device_names)){
+        array_push($missing_devices, $device);
+      }
+    }
+    return $missing_devices;
+  }
+  public function save_devices($devices){
+    try{
+      foreach($this->get_missing_device_names($devices) as $device_name){
+        $device = $this->repository->devices->model();
+        $device->name = $device_name;
+        $this->repository->devices->insert($device);
+      }
+      return true;
+    } catch(Exception $e){
+      return false;
+    }
+  }
+  
+  public function save_meetings($device_map){
+    try{
+      $devices = array_keys($device_map);
+      $this->save_devices($devices);
+      $devices = $this->get_all_devices();
+      foreach($devices as $device){
+        $name = $device->name;
+        if(isset($device_map[$name])){
+          $meetings = $device_map[$name];
+          foreach($meetings as $meeting){
+            $meeting_object = $this->repository->meetings->generate_model_with_attributes($meeting);
+            $this->repository->meetings->insert($meeting_object);
+          }
+        }
+      }
+      return true;
+    } catch(Exception $e){
+      return $e;
+    }
+  }
 }
 
-// echo "INIT";
-$rawPostBody = file_get_contents('php://input');
-// echo $rawPostBody;
-$decodedJson = json_decode($rawPostBody, true);
-// echo $decodedJson;
+$controller = new MeetingsController();
+$response = new stdClass();
+switch($request_method){
+  case "GET":
+    $this_month = isset($_GET["this_month"]);
+    if(isset($_GET["this_month"])){
+      $date = new CustomDate();
+      list($first, $last) = $date->first_and_last_day_of_month();
+      $date_condition = "BETWEEN '{$first}' AND '{$last}'";
 
-// Check if the JSON decoding was successful
-if (JSON_ERROR_NONE === json_last_error()) {
-    // The JSON was successfully decoded and can be used
-    echo "Received JSON: ";
-    echo save_meetings($decodedJson);
+      $response->condition = ["join_datetime $date_condition", "leave_datetime $date_condition"];
+      $response->data = $controller->get_all_meetings($condition=$response->condition);
+    } else if(isset($_GET["last_month"])){
+      $date = new CustomDate();
+      $last_month = $date->last_month();
+      list($first, $last) = $date->first_and_last_day_of_month();
+      $response->date = array($first, $last);
+      $date_condition = "BETWEEN '{$first}' AND '{$last}'";
 
-} else {
-    http_response_code(400);
-    echo "Error: Invalid JSON received.";
+      $response->condition = ["join_datetime $date_condition", "leave_datetime $date_condition"];
+      $response->data = $controller->get_all_meetings($condition=$response->condition);
+    }
+
+    break;
+  case "POST":
+    $request_body = get_request_body();
+    $response->success = $controller->save_meetings($request_body);
+    break;
 }
+echo json_encode($response);
